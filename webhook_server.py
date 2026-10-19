@@ -3,9 +3,10 @@ import logging
 from datetime import datetime
 from typing import Optional, Any, Dict
 from fastapi import FastAPI, Request, HTTPException, Depends, Header
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
-from telegram import Bot
+from telegram import Bot, Update
+from telegram.ext import Application
 import pytz
 
 import database as db
@@ -17,12 +18,15 @@ logger = logging.getLogger(__name__)
 # إنشاء تطبيق FastAPI
 app = FastAPI(title="EGX TradingView Webhook Server", version="1.0.0")
 
-# متغير لتخزين كائن بوت التليجرام
+# متغيرات لتخزين كائن بوت التليجرام والتطبيق
 telegram_bot: Optional[Bot] = None
+telegram_app_instance: Optional[Application] = None
 
-def set_bot_instance(bot: Bot):
-    global telegram_bot
+def set_bot_instance(bot: Bot, app_instance: Optional[Application] = None):
+    global telegram_bot, telegram_app_instance
     telegram_bot = bot
+    if app_instance is not None:
+        telegram_app_instance = app_instance
 
 class SignalPayload(BaseModel):
     secret: Optional[str] = None
@@ -49,6 +53,27 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@app.post("/telegram-webhook")
+async def telegram_webhook(request: Request):
+    """
+    استقبال تحديثات التليجرام عبر الويب هوك وتمريرها للبوت لمعالجتها
+    """
+    global telegram_app_instance
+    if not telegram_app_instance:
+        logger.warning("Telegram webhook received but application instance is not set yet")
+        return Response(status_code=503)
+
+    try:
+        data = await request.json()
+        update = Update.de_json(data, telegram_app_instance.bot)
+        if update:
+            await telegram_app_instance.process_update(update)
+        return Response(status_code=200)
+    except Exception as e:
+        logger.error(f"خطأ في معالجة ويب هوك تليجرام: {e}", exc_info=True)
+        # نرجع 200 لتليجرام لتفادي تكرار إعادة الإرسال في حال وجود رسالة مشوهة
+        return Response(status_code=200)
 
 @app.post("/webhook")
 async def receive_tradingview_signal(request: Request):
