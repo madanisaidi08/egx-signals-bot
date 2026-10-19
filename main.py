@@ -2,6 +2,8 @@ import asyncio
 import logging
 import sys
 import uvicorn
+import httpx
+from telegram import Update
 from telegram.ext import Application
 from bot_handlers import setup_bot_handlers
 from webhook_server import app, set_bot_instance
@@ -10,7 +12,8 @@ from config import (
     TELEGRAM_PROXY_URL,
     TELEGRAM_BASE_URL,
     WEBHOOK_HOST,
-    WEBHOOK_PORT
+    WEBHOOK_PORT,
+    WEBHOOK_BASE_URL
 )
 import database as db
 
@@ -20,6 +23,23 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger("EGX_BOT_MAIN")
+
+async def keep_alive_task(base_url: str, interval_seconds: int = 420):
+    """
+    مهمة دورية لإرسال فحص صحة خارجي كل 7 دقائق لإبقاء الخادم مستيقظاً 24/7 على رندر
+    """
+    if not base_url:
+        return
+    ping_url = f"{base_url.rstrip('/')}/health"
+    await asyncio.sleep(30)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        while True:
+            try:
+                resp = await client.get(ping_url)
+                logger.info(f"Keep-alive ping sent to {ping_url} (HTTP {resp.status_code})")
+            except Exception as e:
+                logger.debug(f"Keep-alive ping note: {e}")
+            await asyncio.sleep(interval_seconds)
 
 async def run_services():
     # 1. تهيئة قاعدة البيانات
@@ -49,7 +69,7 @@ async def run_services():
 
     telegram_app = builder.build()
     setup_bot_handlers(telegram_app)
-    set_bot_instance(telegram_app.bot)
+    set_bot_instance(telegram_app.bot, telegram_app)
 
     # 4. إعداد خادم Uvicorn (FastAPI)
     uvicorn_config = uvicorn.Config(
@@ -62,20 +82,48 @@ async def run_services():
 
     # 5. تشغيل البوت وخادم الويب هوك بالتزامن
     logger.info("Starting Telegram Bot & Webhook Server...")
-    async with telegram_app:
-        await telegram_app.start()
-        await telegram_app.updater.start_polling(drop_pending_updates=True)
-        logger.info(f"🚀 Telegram Bot is polling...")
-        logger.info(f"🌐 FastAPI Webhook Server running at http://{WEBHOOK_HOST}:{WEBHOOK_PORT}/webhook")
-        
+    await telegram_app.initialize()
+    await telegram_app.start()
+
+    keep_alive_fut = None
+
+    if WEBHOOK_BASE_URL:
+        # وضع الويب هوك السحابي لتليجرام (Render Cloud Mode)
+        tg_webhook_url = f"{WEBHOOK_BASE_URL.rstrip('/')}/telegram-webhook"
+        logger.info(f"Configuring Telegram Webhook at: {tg_webhook_url}")
         try:
-            await server.serve()
-        except asyncio.CancelledError:
-            logger.info("Services stopping...")
-        finally:
-            logger.info("Stopping Telegram Bot...")
+            await telegram_app.bot.set_webhook(
+                url=tg_webhook_url,
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=False
+            )
+            logger.info(f"✅ Telegram Webhook registered successfully at {tg_webhook_url}")
+        except Exception as e:
+            logger.error(f"❌ Failed to set Telegram Webhook: {e}")
+
+        # بدء مهمة إبقاء السيرفر مستيقظاً تلقائياً
+        keep_alive_fut = asyncio.create_task(keep_alive_task(WEBHOOK_BASE_URL, interval_seconds=420))
+    else:
+        # وضع الاستطلاع المحلي (Local Polling) إذا لم يتم توفير رابط ويب هوك
+        if telegram_app.updater:
+            await telegram_app.updater.start_polling(drop_pending_updates=False)
+            logger.info("🚀 Telegram Bot is polling...")
+
+    logger.info(f"🌐 FastAPI Webhook Server running at http://{WEBHOOK_HOST}:{WEBHOOK_PORT}/webhook")
+
+    try:
+        await server.serve()
+    except asyncio.CancelledError:
+        logger.info("Services stopping...")
+    finally:
+        logger.info("Stopping Telegram Bot & Services...")
+        if keep_alive_fut and not keep_alive_fut.done():
+            keep_alive_fut.cancel()
+        if telegram_app.updater and telegram_app.updater.running:
             await telegram_app.updater.stop()
-            await telegram_app.stop()
+        await telegram_app.stop()
+        await telegram_app.shutdown()
+
 
 def main():
     try:
