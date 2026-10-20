@@ -53,6 +53,9 @@ def get_stocks_hub_keyboard(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("📑 تصفح كافة الأسهم (300+ سهم)", callback_data="menu_stocks_0")
         ],
         [
+            InlineKeyboardButton("➕ تفعيل كافة أسهم EGX 30 دفعة واحدة", callback_data="add_all_egx30")
+        ],
+        [
             InlineKeyboardButton("🧹 مسح كافة الأسهم المختارة", callback_data="clear_all_stocks"),
             InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")
         ]
@@ -142,7 +145,8 @@ def get_timeframes_keyboard(user_id: int) -> InlineKeyboardMarkup:
         code = tf["code"]
         is_sel = code in user_tfs
         mark = "✅" if is_sel else "⬜"
-        btn_text = f"{mark} {code}"
+        label_suffix = " (جلسة)" if code == "270m" else ""
+        btn_text = f"{mark} {code}{label_suffix}"
         row.append(InlineKeyboardButton(btn_text, callback_data=f"tf_{code}"))
         if len(row) == 2:
             keyboard.append(row)
@@ -417,6 +421,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             kb = get_stocks_keyboard(user_id, page)
             
         await query.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+        return
+
+    # تفعيل كافة أسهم EGX30 دفعة واحدة
+    if data == "add_all_egx30":
+        egx30_symbols = ["COMI", "TMGH", "HRHO", "SWDY", "FWRY", "ETEL", "EAST", "EKHO", "EKHOA", "ESRS",
+                         "ABUK", "MFPC", "SKPC", "AMOC", "EGAL", "ORAS", "OCDI", "PHDC", "HELI", "MASR",
+                         "MNHD", "EMFD", "ORHD", "ORWE", "ISPH", "CCAP", "BTFH", "AUTO", "EFIH", "JUFO",
+                         "ADIB", "CIEB", "HDBK", "QNBA", "SAUD", "TAQA"]
+        db.add_multiple_user_stocks(user_id, egx30_symbols)
+        favs = db.get_user_stocks(user_id)
+        text = f"✅ **تمت إضافة كافة أسهم مؤشر EGX 30 إلى مفضلتك بنجاح!**\n\nإجمالي أسهمك المختارة الآن: **{len(favs)} سهم**."
+        await query.answer("✅ تم تفعيل كافة أسهم EGX 30!")
+        await query.edit_message_text(text, reply_markup=get_stocks_hub_keyboard(user_id), parse_mode="Markdown")
         return
 
     # مسح كافة الأسهم
