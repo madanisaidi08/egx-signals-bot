@@ -358,6 +358,18 @@ def toggle_user_stock(user_id: int, symbol: str) -> bool:
             conn.commit()
             return True
 
+def add_multiple_user_stocks(user_id: int, symbols: List[str]) -> int:
+    """إضافة مجموعة أسهم للمستخدم دفعة واحدة"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        added = 0
+        for s in symbols:
+            clean = normalize_ticker(s)
+            cursor.execute("INSERT OR IGNORE INTO user_stocks (user_id, symbol) VALUES (?, ?)", (user_id, clean))
+            added += cursor.rowcount
+        conn.commit()
+        return added
+
 def get_user_timeframes(user_id: int) -> List[str]:
     """جلب قائمة الفريمات الزمنية المفضلة لمستخدم معين"""
     with get_connection() as conn:
