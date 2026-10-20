@@ -53,6 +53,7 @@ SUPPORTED_TIMEFRAMES = [
     {"code": "30m", "label": "⏱️ 30 دقيقة (30m)", "aliases": ["30", "30m", "30M"]},
     {"code": "1h", "label": "🕐 1 ساعة (1h)", "aliases": ["60", "1h", "1H", "60m"]},
     {"code": "4h", "label": "🕓 4 ساعات (4h)", "aliases": ["240", "4h", "4H", "240m"]},
+    {"code": "270m", "label": "🏛️ 270 دقيقة (جلسة كاملة)", "aliases": ["270", "270m", "270M", "270min", "4.5h", "4h30m", "session", "جلسة"]},
     {"code": "1D", "label": "📅 يومي (1D)", "aliases": ["1D", "D", "1d", "d", "day", "daily"]},
     {"code": "1W", "label": "📆 أسبوعي (1W)", "aliases": ["1W", "W", "1w", "w", "week", "weekly"]}
 ]
